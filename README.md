@@ -17,6 +17,7 @@ A web application for planning journeys across London's transport network using 
 
 ## Project Structure
 
+```plaintext
 london_commute_dashboard/
 ├── backend/
 │ ├── main.py # FastAPI server
@@ -27,6 +28,7 @@ london_commute_dashboard/
 │ └── App.css # Styles
 ├── public/ # Static assets
 └── package.json # Node dependencies
+```
 
 
 
