@@ -10,6 +10,7 @@ function App() {
   const [aiExplanation, setAiExplanation] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
 
+
   const [fromOptions, setFromOptions] = useState([]);
   const [toOptions, setToOptions] = useState([]);
   const [journeys, setJourneys] = useState([]);
@@ -17,6 +18,7 @@ function App() {
   const [error, setError] = useState("");
   const [showFromDropdown, setShowFromDropdown] = useState(false);
   const [showToDropdown, setShowToDropdown] = useState(false);
+
   const [expandedJourney, setExpandedJourney] = useState(null);
 
   // Simple debounce function
@@ -140,11 +142,10 @@ function App() {
     setLoading(true);
     setError("");
     setJourneys([]);
-    setAiExplanation("");
 
     try {
       const response = await fetch(
-        `http://localhost:8000/journey?from_=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+        `http://127.0.0.1:8000/journey?from_=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
       );
       const data = await response.json();
 
@@ -161,42 +162,58 @@ function App() {
     }
   };
 
-  const fetchAIExplanation = async (journeyIndex) => {
+  const generateAIExplanation = (journey) => {
+    const changes = journey.legs.length - 1;
+    const modes = [...new Set(journey.legs.map(l => l.mode))];
+
+    let summary = `This journey takes approximately ${journey.duration} minutes`;
+
+    if (changes === 0) {
+      summary += " and does not require any interchanges.";
+    } else {
+      summary += ` with ${changes} interchange${changes > 1 ? "s" : ""}.`;
+    }
+
+    const reasons = [];
+
+    if (journey.duration <= 30) {
+      reasons.push("This is one of the faster available routes.");
+    }
+
+    if (changes <= 1) {
+      reasons.push("It minimizes transfers, making it easier to follow.");
+    }
+
+    reasons.push(`Transport modes used: ${modes.join(", ")}.`);
+
+    const warnings = [];
+    if (changes >= 2) {
+      warnings.push("Multiple interchanges may increase walking time.");
+    }
+
+    return { summary, reasons, warnings };
+  };
+
+
+  const fetchExplanation = async (journeyIndex) => {
     setAiLoading(true);
     setAiExplanation("");
-    
+
     try {
-      const response = await fetch(
-        `http://localhost:8000/journey/explain?from_=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&index=${journeyIndex}`
+      const res = await fetch(
+        `http://127.0.0.1:8000/journey/explain?from_=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&index=${journeyIndex}`
       );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data.error) {
-        setAiExplanation(`Error: ${data.error}`);
-      } else {
-        // Format the explanation for display
-        const formattedExplanation = data.explanation
-          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')  // Bold text
-          .replace(/\n\n/g, '<br><br>')                     // Paragraphs
-          .replace(/\n/g, '<br>');                          // Line breaks
-        
-        setAiExplanation(formattedExplanation);
-        
-        // Also store the raw data for debugging
-        console.log('AI Explanation data:', data);
-      }
+      const data = await res.json();
+      setAiExplanation(data.explanation || "No explanation available.");
     } catch (err) {
-      console.error('AI explanation error:', err);
-      setAiExplanation(`Failed to load explanation: ${err.message}. Make sure the backend is running.`);
+      setAiExplanation("Failed to load explanation.");
     } finally {
       setAiLoading(false);
     }
   };
+
+
+
 
   return (
     <div className="App" onClick={handleClickOutside}>
@@ -265,8 +282,8 @@ function App() {
           {journeys.map((j, idx) => (
             <div key={idx} className="journey-card">
               <strong>Duration:</strong> {j.duration} minutes<br />
-              <strong>Departure:</strong> {new Date(j.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}<br />
-              <strong>Arrival:</strong> {new Date(j.arrivalTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+              <strong>Departure:</strong> {new Date(j.startTime).toLocaleTimeString()}<br />
+              <strong>Arrival:</strong> {new Date(j.arrivalTime).toLocaleTimeString()}
 
               <div className="legs">
                 <strong>Route:</strong>
@@ -283,41 +300,45 @@ function App() {
               <div className="ai-section">
                 <button
                   className="ai-toggle"
-                  onClick={() => {
-                    if (expandedJourney === idx) {
-                      setExpandedJourney(null);
-                      setAiExplanation("");
-                    } else {
-                      setExpandedJourney(idx);
-                      fetchAIExplanation(idx);
-                    }
-                  }}
-                  disabled={aiLoading && expandedJourney === idx}
+                  onClick={() =>
+                    setExpandedJourney(expandedJourney === idx ? null : idx)
+                  }
                 >
-                  {aiLoading && expandedJourney === idx ? (
-                    <>🤔 Analyzing journey...</>
-                  ) : (
-                    <>🤖 AI Journey Analysis</>
-                  )}
+                  🤖 Explain this journey
                 </button>
 
-                {expandedJourney === idx && aiExplanation && (
-                  <div className="ai-box">
-                    <div 
-                      className="ai-explanation"
-                      dangerouslySetInnerHTML={{ __html: aiExplanation }}
-                    />
-                    <div className="ai-footer">
-                      <small>
-                        {aiExplanation.includes("AI Analysis") 
-                          ? "Powered by Ollama LLM" 
-                          : "Basic analysis (AI unavailable)"}
-                      </small>
+                {expandedJourney === idx && (() => {
+                  const explanation = generateAIExplanation(j);
+                  return (
+                    <div className="ai-box">
+                      <p className="ai-summary">{explanation.summary}</p>
+
+                      <ul>
+                        {explanation.reasons.map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
+                      </ul>
+
+                      {explanation.warnings.length > 0 && (
+                        <>
+                          <strong>Things to note:</strong>
+                          <ul>
+                            {explanation.warnings.map((w, i) => (
+                              <li key={i}>{w}</li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+
+                      <div className="ai-placeholder">
+                        🚧 AI-powered explanations coming soon
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
+
           ))}
         </div>
       )}
@@ -325,4 +346,4 @@ function App() {
   );
 }
 
-export default App; // ← THIS LINE IS CRITICAL
+export default App;
